@@ -1,7 +1,9 @@
-import pandas as pd
 import os
-from sklearn.feature_extraction.text import TfidfVectorizer
+import numpy as np
+import pandas as pd
+import pickle
 import logging
+from sklearn.ensemble import RandomForestClassifier
 import yaml
 
 # Ensure the "logs" directory exists
@@ -9,13 +11,13 @@ log_dir = 'logs'
 os.makedirs(log_dir, exist_ok=True)
 
 # logging configuration
-logger = logging.getLogger('feature_engineering')
+logger = logging.getLogger('model_building')
 logger.setLevel('DEBUG')
 
 console_handler = logging.StreamHandler()
 console_handler.setLevel('DEBUG')
 
-log_file_path = os.path.join(log_dir, 'feature_engineering.log')
+log_file_path = os.path.join(log_dir, 'model_building.log')
 file_handler = logging.FileHandler(log_file_path)
 file_handler.setLevel('DEBUG')
 
@@ -43,70 +45,92 @@ def load_params(params_path: str) -> dict:
         logger.error('Unexpected error: %s', e)
         raise
 
+
 def load_data(file_path: str) -> pd.DataFrame:
-    """Load data from a CSV file."""
+    """
+    Load data from a CSV file.
+    
+    :param file_path: Path to the CSV file
+    :return: Loaded DataFrame
+    """
     try:
         df = pd.read_csv(file_path)
-        df.fillna('', inplace=True)
-        logger.debug('Data loaded and NaNs filled from %s', file_path)
+        logger.debug('Data loaded from %s with shape %s', file_path, df.shape)
         return df
     except pd.errors.ParserError as e:
         logger.error('Failed to parse the CSV file: %s', e)
+        raise
+    except FileNotFoundError as e:
+        logger.error('File not found: %s', e)
         raise
     except Exception as e:
         logger.error('Unexpected error occurred while loading the data: %s', e)
         raise
 
-def apply_tfidf(train_data: pd.DataFrame, test_data: pd.DataFrame, max_features: int) -> tuple:
-    """Apply TfIdf to the data."""
+def train_model(X_train: np.ndarray, y_train: np.ndarray, params: dict) -> RandomForestClassifier:
+    """
+    Train the RandomForest model.
+    
+    :param X_train: Training features
+    :param y_train: Training labels
+    :param params: Dictionary of hyperparameters
+    :return: Trained RandomForestClassifier
+    """
     try:
-        vectorizer = TfidfVectorizer(max_features=max_features)
-
-        X_train = train_data['text'].values
-        y_train = train_data['target'].values
-        X_test = test_data['text'].values
-        y_test = test_data['target'].values
-
-        X_train_bow = vectorizer.fit_transform(X_train)
-        X_test_bow = vectorizer.transform(X_test)
-
-        train_df = pd.DataFrame(X_train_bow.toarray())
-        train_df['label'] = y_train
-
-        test_df = pd.DataFrame(X_test_bow.toarray())
-        test_df['label'] = y_test
-
-        logger.debug('tfidf applied and data transformed')
-        return train_df, test_df
+        if X_train.shape[0] != y_train.shape[0]:
+            raise ValueError("The number of samples in X_train and y_train must be the same.")
+        
+        logger.debug('Initializing RandomForest model with parameters: %s', params)
+        clf = RandomForestClassifier(n_estimators=params['n_estimators'], random_state=params['random_state'])
+        
+        logger.debug('Model training started with %d samples', X_train.shape[0])
+        clf.fit(X_train, y_train)
+        logger.debug('Model training completed')
+        
+        return clf
+    except ValueError as e:
+        logger.error('ValueError during model training: %s', e)
+        raise
     except Exception as e:
-        logger.error('Error during Bag of Words transformation: %s', e)
+        logger.error('Error during model training: %s', e)
         raise
 
-def save_data(df: pd.DataFrame, file_path: str) -> None:
-    """Save the dataframe to a CSV file."""
+
+def save_model(model, file_path: str) -> None:
+    """
+    Save the trained model to a file.
+    
+    :param model: Trained model object
+    :param file_path: Path to save the model file
+    """
     try:
+        # Ensure the directory exists
         os.makedirs(os.path.dirname(file_path), exist_ok=True)
-        df.to_csv(file_path, index=False)
-        logger.debug('Data saved to %s', file_path)
+        
+        with open(file_path, 'wb') as file:
+            pickle.dump(model, file)
+        logger.debug('Model saved to %s', file_path)
+    except FileNotFoundError as e:
+        logger.error('File path not found: %s', e)
+        raise
     except Exception as e:
-        logger.error('Unexpected error occurred while saving the data: %s', e)
+        logger.error('Error occurred while saving the model: %s', e)
         raise
 
 def main():
     try:
-        params = load_params(params_path='params.yaml')
-        max_features = params['feature_engineering']['max_features']
-        # max_features = 50
+        params = load_params('params.yaml')['model_building']
+        train_data = load_data('./data/processed/train_tfidf.csv')
+        X_train = train_data.iloc[:, :-1].values
+        y_train = train_data.iloc[:, -1].values
 
-        train_data = load_data('./data/interim/train_processed.csv')
-        test_data = load_data('./data/interim/test_processed.csv')
+        clf = train_model(X_train, y_train, params)
+        
+        model_save_path = 'models/model.pkl'
+        save_model(clf, model_save_path)
 
-        train_df, test_df = apply_tfidf(train_data, test_data, max_features)
-
-        save_data(train_df, os.path.join("./data", "processed", "train_tfidf.csv"))
-        save_data(test_df, os.path.join("./data", "processed", "test_tfidf.csv"))
     except Exception as e:
-        logger.error('Failed to complete the feature engineering process: %s', e)
+        logger.error('Failed to complete the model building process: %s', e)
         print(f"Error: {e}")
 
 if __name__ == '__main__':
