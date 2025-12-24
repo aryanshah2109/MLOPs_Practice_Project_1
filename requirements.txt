@@ -1,0 +1,16 @@
+PyYAML
+
+numpy
+pandas 
+seaborn
+matplotlib
+
+wordcloud
+nltk
+spacy
+
+scikit-learn
+xgboost
+
+dvc
+dvclive
