@@ -14,3 +14,6 @@ xgboost
 
 dvc
 dvclive
+dvc[s3]
+
+awscli
